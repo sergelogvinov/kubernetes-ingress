@@ -31,7 +31,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 )
 
-const DEBUG_API = false //nolint golint
+const DEBUG_API = true //nolint golint
 
 var ErrIgnored = errors.New("Ignored resource") //nolint golint
 
@@ -75,6 +75,93 @@ func GetRemoteKubernetesClient(osArgs OSArgs) (*K8s, error) {
 		panic(err.Error())
 	}
 	return &K8s{API: clientset}, nil
+}
+
+func (k *K8s) EventsNodes(channel chan *Node, stop chan struct{}) {
+	//selector := fields.Selector("status.Phase=running")
+
+	watchlist := cache.NewListWatchFromClient(
+		k.API.CoreV1().RESTClient(),
+		string("nodes"),
+		corev1.NamespaceAll,
+		fields.Everything(),
+	)
+	_, controller := cache.NewInformer( // also take a look at NewSharedIndexInformer
+		watchlist,
+		&corev1.Node{},
+		5*time.Second, //Duration is int64
+		cache.ResourceEventHandlerFuncs{
+			AddFunc: func(obj interface{}) {
+				data := obj.(*corev1.Node)
+				var status = ADDED
+				if data.ObjectMeta.GetDeletionTimestamp() != nil {
+					//detect services that are in terminating state
+					status = DELETED
+				}
+
+				role := data.GetLabels()["kubernetes.io/role"]
+				if role == "worker" {
+					return
+				}
+
+				item := &Node{
+					Name:          data.GetName(),
+					Role:          role,
+					Address:       ConvertNodeAddress(data.Status.Addresses),
+					Unschedulable: ConvertNodeStatus(data),
+					Labels:        data.GetLabels(),
+					Annotations:   data.GetAnnotations(),
+					Status:        status,
+				}
+				if DEBUG_API {
+					log.Printf("%s %s: %s \n", NODES, item.Status, item.Name)
+				}
+				channel <- item
+			},
+			DeleteFunc: func(obj interface{}) {
+				data := obj.(*corev1.Node)
+				var status = DELETED
+				item := &Node{
+					Name:   data.GetName(),
+					Status: status,
+				}
+				if DEBUG_API {
+					log.Printf("%s %s: %s \n", NODES, item.Status, item.Name)
+				}
+				channel <- item
+			},
+			UpdateFunc: func(oldObj, newObj interface{}) {
+				data1 := oldObj.(*corev1.Node)
+				data2 := newObj.(*corev1.Node)
+				var status = MODIFIED
+				item1 := &Node{
+					Name:          data1.GetName(),
+					Role:          data1.GetLabels()["kubernetes.io/role"],
+					Address:       ConvertNodeAddress(data1.Status.Addresses),
+					Unschedulable: ConvertNodeStatus(data1),
+					Status:        status,
+				}
+				item2 := &Node{
+					Name:          data2.GetName(),
+					Role:          data2.GetLabels()["kubernetes.io/role"],
+					Address:       ConvertNodeAddress(data2.Status.Addresses),
+					Unschedulable: ConvertNodeStatus(data2),
+					Status:        status,
+				}
+
+				if item2.Equal(item1) {
+					return
+				}
+
+				if DEBUG_API {
+					log.Printf("%s %#v %#v\n", NODES, item1, item2)
+				}
+
+				channel <- item2
+			},
+		},
+	)
+	go controller.Run(stop)
 }
 
 func (k *K8s) EventsNamespaces(channel chan *Namespace, stop chan struct{}) {

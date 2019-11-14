@@ -23,6 +23,7 @@ const (
 	CONFIGMAP SyncType = "CONFIGMAP"
 	ENDPOINTS SyncType = "ENDPOINTS"
 	INGRESS   SyncType = "INGRESS"
+	NODES     SyncType = "NODES"
 	NAMESPACE SyncType = "NAMESPACE"
 	SERVICE   SyncType = "SERVICE"
 	SECRET    SyncType = "SECRET"

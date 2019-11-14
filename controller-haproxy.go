@@ -16,10 +16,13 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"log"
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/haproxytech/models"
 )
 
 func (c *HAProxyController) updateHAProxy() error {
@@ -55,6 +58,10 @@ func (c *HAProxyController) updateHAProxy() error {
 	}
 
 	reload, err := c.handleGlobalAnnotations()
+	LogErr(err)
+	needsReload = needsReload || reload
+
+	reload, err = c.handleNodes()
 	LogErr(err)
 	needsReload = needsReload || reload
 
@@ -143,9 +150,9 @@ func (c *HAProxyController) updateHAProxy() error {
 	LogErr(err)
 
 	//handle default service
-	reload, err = c.handleDefaultService()
-	LogErr(err)
-	needsReload = needsReload || reload
+	// reload, err = c.handleDefaultService()
+	// LogErr(err)
+	// needsReload = needsReload || reload
 
 	reload, err = c.requestsTCPRefresh()
 	LogErr(err)
@@ -185,6 +192,49 @@ func (c *HAProxyController) handleMaxconn(maxconn *int64, frontends ...string) e
 		}
 	}
 	return nil
+}
+
+func (c *HAProxyController) handleNodes() (needsReload bool, err error) {
+	needsReload = false
+
+	port := int64(443)
+	backendName := fmt.Sprintf("k8s-cluster-%d", port)
+
+	_, err = c.backendGet(backendName)
+	if err != nil {
+		backend := models.Backend{
+			Name: backendName,
+			Mode: "http",
+		}
+
+		if err := c.backendCreate(backend); err != nil {
+			msg := err.Error()
+			if !strings.Contains(msg, "Farm already exists") {
+				needsReload = false
+			}
+		} else {
+			c.handleBackendAnnotations(&Ingress{}, &Service{}, backendName, true)
+			needsReload = true
+		}
+		needsReload = true
+	}
+
+	sortedList := make([]string, len(c.cfg.Node))
+	index := 0
+	for name := range c.cfg.Node {
+		sortedList[index] = name
+		index++
+	}
+	sort.Strings(sortedList)
+
+	index = 0
+	for _, name := range sortedList {
+		reload, _ := c.handleNode(index, c.cfg.Node[name], port)
+		needsReload = needsReload || reload
+		index++
+	}
+
+	return needsReload, nil
 }
 
 func (c *HAProxyController) handleDefaultService() (needsReload bool, err error) {

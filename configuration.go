@@ -34,6 +34,7 @@ type NamespacesWatch struct {
 }
 
 type Configuration struct {
+	Node                  map[string]*Node
 	Namespace             map[string]*Namespace
 	NamespacesAccess      NamespacesWatch
 	ConfigMap             *ConfigMap
@@ -75,6 +76,7 @@ func (c *Configuration) Init(osArgs OSArgs, api *clientnative.HAProxyClient) {
 	for _, namespace := range osArgs.NamespaceBlacklist {
 		c.NamespacesAccess.Blacklist[namespace] = struct{}{}
 	}
+	c.Node = make(map[string]*Node)
 	c.Namespace = make(map[string]*Namespace)
 	c.SSLRedirect = ""
 	c.NativeAPI = api
@@ -121,6 +123,14 @@ func (c *Configuration) NewNamespace(name string) *Namespace {
 //Clean cleans all the statuses of various data that was changed
 //deletes them completely or just resets them if needed
 func (c *Configuration) Clean() {
+	for _, data := range c.Node {
+		switch data.Status {
+		case DELETED:
+			delete(c.Node, data.Name)
+		default:
+			data.Status = EMPTY
+		}
+	}
 	for _, namespace := range c.Namespace {
 		for _, data := range namespace.Ingresses {
 			for _, tls := range data.TLS {

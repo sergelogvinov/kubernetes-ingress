@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"strings"
 
+	corev1 "k8s.io/api/core/v1"
 	//networking "k8s.io/api/networking/v1beta1"
 	extensions "k8s.io/api/extensions/v1beta1"
 )
@@ -56,6 +57,25 @@ func RandomString(n int) string {
 		b[i] = chars[rand.Intn(size)]
 	}
 	return string(b)
+}
+
+//ConvertNodeAddress get ipadrees of node
+func ConvertNodeAddress(NodeAddress []corev1.NodeAddress) string {
+	for _, k8sNodeAddress := range NodeAddress {
+		if k8sNodeAddress.Type == corev1.NodeInternalIP {
+			return k8sNodeAddress.Address
+		}
+	}
+	return ""
+}
+
+func ConvertNodeStatus(Node *corev1.Node) bool {
+	for _, condition := range Node.Status.Conditions {
+		if condition.Type == corev1.NodeNetworkUnavailable && condition.Status == corev1.ConditionFalse {
+			return Node.Spec.Unschedulable
+		}
+	}
+	return true
 }
 
 //ConvertIngressRules converts data from kubernetes format

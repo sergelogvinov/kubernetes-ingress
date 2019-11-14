@@ -186,6 +186,61 @@ func (c *HAProxyController) HAProxyReload() error {
 	return err
 }
 
+func (c *HAProxyController) handleNode(index int, node *Node, port int64) (needsReload bool, err error) {
+
+	weight := int64(128)
+	backendName := fmt.Sprintf("k8s-cluster-%d", port)
+
+	server := models.Server{
+		Name:    node.Name,
+		Address: node.Address,
+		Port:    &port,
+		Weight:  &weight,
+		Check:   "enabled",
+		Ssl:     "enabled",
+		Verify:  "none",
+	}
+	if node.Unschedulable {
+		server.Maintenance = "enabled"
+	}
+
+	status := node.Status
+	switch status {
+	case ADDED:
+		err = c.backendServerCreate(backendName, server)
+		if err != nil {
+			if !strings.Contains(err.Error(), "already exists") {
+				LogErr(err)
+				needsReload = true
+			}
+		} else {
+			needsReload = true
+		}
+		log.Printf("Add: %s - %s - %s\n", backendName, node.Name, server.Maintenance)
+	case MODIFIED:
+		err := c.backendServerEdit(backendName, server)
+		if err != nil {
+			if strings.Contains(err.Error(), "does not exist") {
+				err1 := c.backendServerCreate(backendName, server)
+				LogErr(err1)
+				needsReload = true
+			} else {
+				LogErr(err)
+			}
+		}
+
+		log.Printf("Modified: %s - %s - %s\n", backendName, node.Name, server.Maintenance)
+	case DELETED:
+		err := c.backendServerDelete(backendName, node.Name)
+		if err != nil && !strings.Contains(err.Error(), "does not exist") {
+			LogErr(err)
+		}
+		needsReload = true
+	}
+
+	return needsReload, err
+}
+
 func (c *HAProxyController) handlePath(index int, namespace *Namespace, ingress *Ingress, rule *IngressRule, path *IngressPath) (needReload bool, err error) {
 	needReload = false
 	service, ok := namespace.Services[path.ServiceName]
@@ -194,23 +249,23 @@ func (c *HAProxyController) handlePath(index int, namespace *Namespace, ingress 
 		return needReload, fmt.Errorf("service %s does not exists", path.ServiceName)
 	}
 
-	backendName, newBackend, reload, err := c.handleService(index, namespace, ingress, rule, path, service)
+	_, _, reload, err := c.handleService(index, namespace, ingress, rule, path, service)
 	needReload = needReload || reload
 	if err != nil {
 		return needReload, err
 	}
 
-	endpoints, ok := namespace.Endpoints[service.Name]
-	if !ok {
-		log.Printf("Endpoint for service %s does not exists", service.Name)
-		return needReload, nil // not an end of world scenario, just log this
-	}
-	endpoints.BackendName = backendName
+	// endpoints, ok := namespace.Endpoints[service.Name]
+	// if !ok {
+	// 	log.Printf("Endpoint for service %s does not exists", service.Name)
+	// 	return needReload, nil // not an end of world scenario, just log this
+	// }
+	// endpoints.BackendName = backendName
 
-	for _, ip := range *endpoints.Addresses {
-		reload := c.handleEndpointIP(namespace, ingress, rule, path, service, backendName, newBackend, endpoints, ip)
-		needReload = needReload || reload
-	}
+	// for _, ip := range *endpoints.Addresses {
+	// 	reload := c.handleEndpointIP(namespace, ingress, rule, path, service, backendName, newBackend, endpoints, ip)
+	// 	needReload = needReload || reload
+	// }
 	return needReload, nil
 }
 
@@ -297,7 +352,9 @@ func (c *HAProxyController) handleService(index int, namespace *Namespace, ingre
 		}
 	}
 
-	backendName = fmt.Sprintf("%s-%s-%d", namespace.Name, service.Name, path.ServicePortInt)
+	// backendName = fmt.Sprintf("%s-%s-%d", namespace.Name, service.Name, path.ServicePortInt)
+	backendName = fmt.Sprintf("k8s-cluster-443")
+
 	// Update usebackend rules
 	if rule != nil {
 		key := fmt.Sprintf("R%s%s%s%0006d", namespace.Name, ingress.Name, rule.Host, index)

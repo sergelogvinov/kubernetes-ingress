@@ -57,6 +57,18 @@ type Service struct {
 	Status      Status
 }
 
+//Node is usefull data from k8s structures about node
+type Node struct {
+	_             [0]int
+	Name          string
+	Role          string
+	Address       string
+	Labels        map[string]string
+	Annotations   map[string]string
+	Unschedulable bool
+	Status        Status
+}
+
 //Namespace is usefull data from k8s structures about namespace
 type Namespace struct {
 	_         [0]int

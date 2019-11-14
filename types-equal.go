@@ -158,6 +158,20 @@ func (a *Service) Equal(b *Service) bool {
 	return true
 }
 
+//Equal checks if Node status are equal
+func (a *Node) Equal(b *Node) bool {
+	if a == nil || b == nil {
+		return false
+	}
+	if a.Address != b.Address {
+		return false
+	}
+	if a.Unschedulable != b.Unschedulable {
+		return false
+	}
+	return true
+}
+
 //Equal compares two config maps, ignores statuses and old values
 func (a *ConfigMap) Equal(b *ConfigMap) bool {
 	if a == nil || b == nil {

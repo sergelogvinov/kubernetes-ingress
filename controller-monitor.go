@@ -33,6 +33,9 @@ func (c *HAProxyController) monitorChanges() {
 	svcChan := make(chan *Service, 100)
 	c.k8s.EventsServices(svcChan, stop)
 
+	ndChan := make(chan *Node, 10)
+	c.k8s.EventsNodes(ndChan, stop)
+
 	nsChan := make(chan *Namespace, 10)
 	c.k8s.EventsNamespaces(nsChan, stop)
 
@@ -45,6 +48,7 @@ func (c *HAProxyController) monitorChanges() {
 	secretChan := make(chan *Secret, 10)
 	c.k8s.EventsSecrets(secretChan, stop)
 
+	eventsNodes := []SyncDataEvent{}
 	eventsIngress := []SyncDataEvent{}
 	eventsEndpoints := []SyncDataEvent{}
 	eventsServices := []SyncDataEvent{}
@@ -53,6 +57,9 @@ func (c *HAProxyController) monitorChanges() {
 	for {
 		select {
 		case <-configMapReceivedAndProcessed:
+			for _, event := range eventsNodes {
+				c.eventChan <- event
+			}
 			for _, event := range eventsIngress {
 				c.eventChan <- event
 			}
@@ -62,6 +69,7 @@ func (c *HAProxyController) monitorChanges() {
 			for _, event := range eventsServices {
 				c.eventChan <- event
 			}
+			eventsNodes = []SyncDataEvent{}
 			eventsIngress = []SyncDataEvent{}
 			eventsEndpoints = []SyncDataEvent{}
 			eventsServices = []SyncDataEvent{}
@@ -96,6 +104,9 @@ func (c *HAProxyController) monitorChanges() {
 		case item := <-secretChan:
 			event := SyncDataEvent{SyncType: SECRET, Namespace: item.Namespace, Data: item}
 			c.eventChan <- event
+		case item := <-ndChan:
+			event := SyncDataEvent{SyncType: NODES, Namespace: "default", Data: item}
+			c.eventChan <- event
 		case <-time.After(time.Duration(syncEveryNSeconds) * time.Second):
 			//TODO syncEveryNSeconds sec is hardcoded, change that (annotation?)
 			//do sync of data every syncEveryNSeconds sec
@@ -124,6 +135,8 @@ func (c *HAProxyController) SyncData(jobChan <-chan SyncDataEvent, chConfigMapRe
 			}
 		case NAMESPACE:
 			change = c.eventNamespace(ns, job.Data.(*Namespace))
+		case NODES:
+			change = c.eventNodes(ns, job.Data.(*Node))
 		case INGRESS:
 			change = c.eventIngress(ns, job.Data.(*Ingress))
 		case ENDPOINTS:

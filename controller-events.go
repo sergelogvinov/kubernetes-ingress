@@ -37,6 +37,48 @@ func (c *HAProxyController) eventNamespace(ns *Namespace, data *Namespace) (upda
 	return updateRequired
 }
 
+func (c *HAProxyController) eventNodes(ns *Namespace, data *Node) (updateRequired bool) {
+
+	log.Println("Update event", data.Name)
+
+	updateRequired = false
+	switch data.Status {
+	case MODIFIED:
+		newNode := data
+		oldNode, ok := c.cfg.Node[data.Name]
+		if !ok {
+			log.Println("Node not registered with controller !", data.Name)
+			return updateRequired
+		}
+		if oldNode.Equal(newNode) {
+			return updateRequired
+		}
+		c.cfg.Node[data.Name] = newNode
+		updateRequired = true
+	case ADDED:
+		if old, ok := c.cfg.Node[data.Name]; ok {
+			data.Status = old.Status
+			if !old.Equal(data) {
+				data.Status = MODIFIED
+				return c.eventNodes(ns, data)
+			}
+			return updateRequired
+		}
+		c.cfg.Node[data.Name] = data
+		updateRequired = true
+	case DELETED:
+		oldData, ok := c.cfg.Node[data.Name]
+		if ok {
+			oldData.Status = DELETED
+			log.Println("Node deleted", data.Name)
+			updateRequired = true
+		} else {
+			log.Println("Node not registered with controller, cannot delete !", oldData.Name)
+		}
+	}
+	return updateRequired
+}
+
 func (c *HAProxyController) eventIngress(ns *Namespace, data *Ingress) (updateRequired bool) {
 	updateRequired = false
 	switch data.Status {
